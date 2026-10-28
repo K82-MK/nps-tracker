@@ -1,0 +1,77 @@
+name: 국내 연기금 수집
+
+on:
+  schedule:
+    - cron: "10 9 * * 1-5"     # 평일 18:10 KST — 당일 수집
+    - cron: "40 23 * * 0-4"    # 다음날 08:40 KST — 직전 영업일 확정치로 재수집
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "실행 방식"
+        type: choice
+        options: [today, backfill, redo-last, date]
+        default: today
+      backfill_days:
+        description: "backfill일 때 영업일 수"
+        default: "120"
+      date:
+        description: "date일 때 기준일 (YYYYMMDD)"
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      TZ: Asia/Seoul
+      KRX_ID: ${{ secrets.KRX_ID }}
+      KRX_PW: ${{ secrets.KRX_PW }}
+      KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
+      DART_API_KEY: ${{ secrets.DART_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: SQLite 캐시 복원
+        uses: actions/cache@v4
+        with:
+          path: db/nps.sqlite
+          key: nps-db-${{ github.run_id }}
+          restore-keys: nps-db-
+
+      - name: 수집 · 저장 · JSON 내보내기
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            if [ "${{ github.event.schedule }}" = "40 23 * * 0-4" ]; then MODE=redo-last; else MODE=today; fi
+          fi
+          echo "실행 방식: $MODE"
+          case "$MODE" in
+            backfill)  python -m collector.run_daily --backfill "${{ github.event.inputs.backfill_days || '120' }}" ;;
+            redo-last) python -m collector.run_daily --redo-last ;;
+            date)      python -m collector.run_daily --date "${{ github.event.inputs.date }}" --force ;;
+            *)         python -m collector.run_daily ;;
+          esac
+
+      - name: 변경분 커밋
+        if: always()
+        run: |
+          git config user.name  "nps-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "data: 국내 $(date +%F) 갱신"
+          for i in 1 2 3; do git pull --rebase && git push && break; sleep 5; done
