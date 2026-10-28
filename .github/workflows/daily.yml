@@ -6,17 +6,22 @@ on:
     - cron: "40 23 * * 0-4"    # 다음날 08:40 KST — 직전 영업일 확정치로 재수집
   workflow_dispatch:
     inputs:
-      mode:
-        description: "실행 방식"
-        type: choice
-        options: [today, backfill, redo-last, date]
-        default: today
-      backfill_days:
-        description: "backfill일 때 영업일 수"
-        default: "120"
-      date:
-        description: "date일 때 기준일 (YYYYMMDD)"
+      start_date:
+        description: "시작일 (예: 2026-06-01) · 비우면 오늘 하루"
+        type: string
         default: ""
+      end_date:
+        description: "종료일 (예: 2026-10-27) · 비우면 시작일 하루만"
+        type: string
+        default: ""
+      recent_days:
+        description: "또는 최근 N영업일 한꺼번에 (예: 120) · 입력하면 위 날짜 대신 사용"
+        type: string
+        default: ""
+      overwrite:
+        description: "이미 받은 날짜도 다시 받기"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -53,18 +58,31 @@ jobs:
           restore-keys: nps-db-
 
       - name: 수집 · 저장 · JSON 내보내기
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          IN_START: ${{ github.event.inputs.start_date }}
+          IN_END: ${{ github.event.inputs.end_date }}
+          IN_DAYS: ${{ github.event.inputs.recent_days }}
+          IN_OVERWRITE: ${{ github.event.inputs.overwrite }}
         run: |
-          MODE="${{ github.event.inputs.mode }}"
-          if [ -z "$MODE" ]; then
-            if [ "${{ github.event.schedule }}" = "40 23 * * 0-4" ]; then MODE=redo-last; else MODE=today; fi
+          ARGS=()
+          if [ "$EVENT" = "schedule" ]; then
+            if [ "$SCHEDULE" = "40 23 * * 0-4" ]; then ARGS=(--redo-last); fi
+          else
+            IN_DAYS="$(echo "$IN_DAYS" | tr -dc '0-9')"
+            if [ -n "$IN_DAYS" ]; then
+              ARGS=(--backfill "$IN_DAYS")
+              [ -n "$IN_END" ] && ARGS+=(--date "$IN_END")
+            elif [ -n "$IN_START" ]; then
+              ARGS=(--start "$IN_START" --date "${IN_END:-$IN_START}")
+            elif [ -n "$IN_END" ]; then
+              ARGS=(--date "$IN_END")
+            fi
+            [ "$IN_OVERWRITE" = "true" ] && ARGS+=(--force)
           fi
-          echo "실행 방식: $MODE"
-          case "$MODE" in
-            backfill)  python -m collector.run_daily --backfill "${{ github.event.inputs.backfill_days || '120' }}" ;;
-            redo-last) python -m collector.run_daily --redo-last ;;
-            date)      python -m collector.run_daily --date "${{ github.event.inputs.date }}" --force ;;
-            *)         python -m collector.run_daily ;;
-          esac
+          echo "실행 인자: ${ARGS[*]:-(오늘)}"
+          python -m collector.run_daily "${ARGS[@]}"
 
       - name: 변경분 커밋
         if: always()

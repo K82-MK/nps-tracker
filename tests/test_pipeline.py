@@ -150,3 +150,15 @@ def test_failure_keeps_previous_day(monkeypatch):
     assert run_daily(["--source", "fake", "--date", "20261028"]) == 1      # 실패 → 종료코드 1
     assert not (config.RAW_KRX / "20261028.json.gz").exists()
     assert read_json(DATA / "index.json")["latest"] == "2026-10-27"         # 화면은 직전 영업일 유지
+
+
+# ------------------------------------------------------------------ 기간 지정
+def test_date_range_and_formats():
+    from collector.run_daily import norm_date
+    assert norm_date("2026-06-01") == norm_date("20260601") == norm_date("2026.6.1") == "20260601"
+    assert norm_date("") is None
+    # 휴장일(10/9)이 낀 기간 → 영업일만 받음, 시작·종료 순서가 바뀌어도 동작
+    assert run_daily(["--source", "fake", "--start", "2026-10-12", "--date", "2026-10-06", "--force"]) == 0
+    for d in ("2026-10-06", "2026-10-08", "2026-10-12"):
+        assert (DATA / "daily" / f"{d}.json").exists()
+    assert not (config.RAW_KRX / "20261009.json.gz").exists()

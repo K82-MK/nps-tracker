@@ -32,7 +32,7 @@ Settings → Actions → General → **Workflow permissions → Read and write p
 
 ### 4. 첫 데이터 만들기
 Actions 탭 →
-1. **국내 연기금 수집** → Run workflow → mode `backfill`, 일수 `120` (KRX 호출 간격 때문에 30~60분)
+1. **국내 연기금 수집** → Run workflow → `최근 N영업일`에 `120` (KRX 호출 간격 때문에 30~60분)
 2. **해외 13F 수집** → Run workflow (5~10분)
 
 ### 5. 사이트 공개
@@ -40,6 +40,20 @@ Settings → Pages → Source **Deploy from a branch** → Branch `main` / `/(ro
 1~2분 뒤 https://k82-mk.github.io/nps-tracker/ 에서 열립니다.
 
 ---
+
+## 원하는 날짜·기간 수집하기
+Actions → **국내 연기금 수집** → **Run workflow** 에서 칸을 채우고 실행합니다.
+
+| 하고 싶은 것 | 시작일 | 종료일 | 최근 N영업일 |
+|---|---|---|---|
+| 오늘만 | (비움) | (비움) | (비움) |
+| 특정 하루 | `2026-10-20` | (비움) | (비움) |
+| 기간 | `2026-06-01` | `2026-10-27` | (비움) |
+| 최근 120영업일 | (비움) | (비움) | `120` |
+
+- 날짜는 `2026-06-01`, `20260601`, `2026.6.1` 모두 됩니다. 주말·휴장일은 자동으로 건너뜁니다.
+- 이미 받은 날짜는 건너뜁니다. 다시 받으려면 **이미 받은 날짜도 다시 받기**를 체크하세요.
+- 수집이 끝나면 사이트 상단 달력에서 받은 기간 안의 아무 날짜나 고를 수 있습니다. 하루에 1~2분 걸리므로 한 번에 120영업일 안팎을 권장합니다(최대 실행시간 150분).
 
 ## 자동 실행 일정 (KST)
 
@@ -71,6 +85,7 @@ tests/       오프라인 모의 데이터 테스트
 pip install -r requirements.txt pytest
 python -m pytest -q tests                                  # 모의 데이터 테스트
 KRX_ID=... KRX_PW=... DART_API_KEY=... python -m collector.run_daily --backfill 22
+python -m collector.run_daily --start 2026-06-01 --date 2026-06-30      # 기간 지정
 python -m http.server 8000                                 # http://localhost:8000
 ```
 

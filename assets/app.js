@@ -120,7 +120,10 @@
     const dates = idx.dates || [];
     if (!dates.length) {
       $app.innerHTML = `<div class="empty"><h2>아직 수집된 데이터가 없어요</h2>
-        <p>GitHub 저장소 Actions 탭에서 ‘국내 연기금 수집’을 백필(120일)로 한 번 실행하면 여기에 표시됩니다.</p></div>`;
+        <p>GitHub 저장소 → Actions → ‘국내 연기금 수집’ → <b>Run workflow</b>에서<br>
+        보고 싶은 기간의 <b>시작일·종료일</b>(예: 2026-06-01 ~ 2026-10-27)을 넣거나<br>
+        ‘최근 N영업일’에 <b>120</b>을 넣고 실행하면 여기에 표시됩니다.</p>
+        <p class="hint">수집이 끝나면 위쪽 달력에서 그 기간 안의 날짜를 골라 볼 수 있어요.</p></div>`;
       return;
     }
     const { date, note } = resolveDate(arg, dates);
@@ -147,6 +150,7 @@
           <button data-go="${dates[i + 1] || ""}" ${i === dates.length - 1 ? "disabled" : ""} aria-label="다음 영업일" title="다음 영업일">${icon.next}</button>
           <button data-go="${dates[dates.length - 1]}" ${i === dates.length - 1 ? "disabled" : ""} aria-label="최신 영업일" title="최신 영업일">${icon.last}</button>
         </div>
+        <p class="range">달력에서 고를 수 있는 기간 <b class="num">${dates[0]}</b> ~ <b class="num">${dates[dates.length - 1]}</b> · ${nf(dates.length)}영업일</p>
         ${note ? `<p class="notice">${esc(note)}</p>` : ""}
         <div class="strip">
           ${["KOSPI", "KOSDAQ"].map((m) => {
