@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import re
 import time
 from datetime import timedelta
 from typing import Protocol
@@ -42,6 +43,32 @@ class Source(Protocol):
 
 class HolidayError(Exception):
     """해당 일자는 휴장일(또는 아직 데이터 없음)."""
+
+
+# KRX 화면 라벨 변형 → 내부 표준 이름
+_INVESTOR_ALIAS = {"연기금등": "연기금", "외국인합계": "외국인", "기관": "기관합계"}
+
+
+def _norm_investor(label) -> str:
+    """'연기금 등', ' 연기금 ', '연기금등' → '연기금'."""
+    s = re.sub(r"\s+", "", str(label))
+    return _INVESTOR_ALIAS.get(s, s)
+
+
+def _flows_from_summary(df) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if df is None or getattr(df, "empty", True):
+        return out
+    cols = {re.sub(r"\s+", "", str(c)): c for c in df.columns}
+    if not all(k in cols for k in ("매수", "매도", "순매수")):
+        log.warning("기간합계 표 열 이름이 예상과 다름: %s", list(df.columns))
+        return out
+    for label, r in df.iterrows():
+        name = _norm_investor(label)
+        if name in INVESTOR_ROWS and name not in out:
+            out[name] = {"buy": int(r[cols["매수"]]), "sell": int(r[cols["매도"]]),
+                         "net": int(r[cols["순매수"]])}
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -81,19 +108,43 @@ class PykrxSource:
 
     @retry(tries=4, empty_is_error=True)
     def investor_flows(self, d: str, market: str) -> dict[str, dict]:
+        """시장 투자자별 매수·매도·순매수(원).
+
+        1차: 기간합계 표(get_market_trading_value_by_investor). 행 이름은 KRX가 주는
+             문자열 그대로라 '연기금 등'처럼 바뀌면 매칭이 깨진다 → 정규화해서 찾는다.
+        2차: 그래도 연기금이 없으면 일별추이 상세표(get_market_trading_value_by_date,
+             detail=True). 이 표의 열 이름은 pykrx가 위치로 붙이므로 KRX 라벨 변경에 강하다.
+        """
         df = self.stock.get_market_trading_value_by_investor(ymd(d), ymd(d), market)
         self._pause()
-        out = {}
-        for inv in INVESTOR_ROWS:
-            if inv in df.index:
-                r = df.loc[inv]
-                out[inv] = {"buy": int(r["매수"]), "sell": int(r["매도"]), "net": int(r["순매수"])}
+        out = _flows_from_summary(df)
         if INVESTOR not in out:
-            raise ValueError("연기금 행 없음")
+            labels = [str(x) for x in getattr(df, "index", [])]
+            log.warning("기간합계 표에 연기금 행 없음(%s) — 실제 행: %s → 일별추이 상세표로 대체",
+                        market, labels or "(빈 표)")
+            out = self._flows_from_daily(d, market)
+        if INVESTOR not in out:
+            raise ValueError("연기금 행 없음(두 경로 모두)")
         inst = ["금융투자", "보험", "투신", "사모", "은행", "기타금융", "연기금"]
         if "기관합계" not in out and all(k in out for k in inst):   # 상세 표에는 합계 행이 없을 수 있음
             out["기관합계"] = {f: sum(out[k][f] for k in inst) for f in ("buy", "sell", "net")}
         return out
+
+    def _flows_from_daily(self, d: str, market: str) -> dict[str, dict]:
+        cols: dict[str, dict[str, int]] = {}
+        for on, key in (("매수", "buy"), ("매도", "sell"), ("순매수", "net")):
+            df = self.stock.get_market_trading_value_by_date(ymd(d), ymd(d), market,
+                                                             on=on, detail=True)
+            self._pause()
+            if df is None or df.empty:
+                log.warning("일별추이(%s, %s) 빈 표", market, on)
+                return {}
+            row = df.iloc[-1]
+            for c in df.columns:
+                name = _norm_investor(c)
+                if name in INVESTOR_ROWS:
+                    cols.setdefault(name, {})[key] = int(row[c])
+        return {k: v for k, v in cols.items() if len(v) == 3}
 
     @retry(tries=4)
     def pension_by_stock(self, d: str, market: str) -> list[list]:

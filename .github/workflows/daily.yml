@@ -36,6 +36,7 @@ jobs:
     timeout-minutes: 150
     env:
       TZ: Asia/Seoul
+      PYTHONUNBUFFERED: "1"
       KRX_ID: ${{ secrets.KRX_ID }}
       KRX_PW: ${{ secrets.KRX_PW }}
       KRX_API_KEY: ${{ secrets.KRX_API_KEY }}
